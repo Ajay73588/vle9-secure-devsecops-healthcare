@@ -66,13 +66,13 @@ aws ssm describe-instance-information --filters "Key=InstanceIds,Values=i-00a161
    - **Grafana Dashboard:** `http://127.0.0.1:3000` *(or `13000` if busy)*
    - **Prometheus Targets:** `http://127.0.0.1:9090/targets`
 
-6. Verify services over SSM from PowerShell (writing a BOM-less JSON file avoids Windows PowerShell quote stripping):
+6. Verify services over SSM from PowerShell (always run Kubernetes/Minikube commands as user `jenkins`; writing a BOM-less JSON file avoids Windows PowerShell quote stripping):
 
 ```powershell
 $p = @{ commands = @(
   'systemctl is-active jenkins docker nginx vle9-minikube vle9-alert-sink',
   'docker ps --format "table {{.Names}}\t{{.Status}}"',
-  'su -s /bin/bash jenkins -c "HOME=/var/lib/jenkins kubectl get pods -n securecare"',
+  'sudo -u jenkins -H bash -lc "kubectl get nodes && kubectl get pods -n securecare"',
   'curl -fsS http://127.0.0.1:8081/health'
 ) } | ConvertTo-Json
 $tmp = Join-Path $env:TEMP "vle9-verify.json"
@@ -82,4 +82,6 @@ Start-Sleep -Seconds 4
 aws ssm get-command-invocation --command-id $cid --instance-id i-00a1616bf3dee5989 --region ap-south-1 --query "{Status:Status,Stdout:StandardOutputContent}" --output json
 Remove-Item -Force $tmp -ErrorAction SilentlyContinue
 ```
+
+> **Verified Cycle:** Stopping and starting `i-00a1616bf3dee5989` followed by `.\scripts\update-github-webhook.ps1` automatically restored all `systemd` units, 7 Docker containers, Minikube `v1.37.0` with `2/2` `securecare` pods, Nginx `:8081` proxy routing, `5/5` Prometheus targets, and a `200 OK` GitHub webhook ping on the new ephemeral IPv4.
 

@@ -4,15 +4,15 @@ Independent end-to-end DevSecOps implementation featuring a hardened synthetic h
 
 ---
 
-## Live Verification Snapshot (Jenkins Build `#4`)
+## Live Verification Snapshot (Jenkins Build `#5`)
 
-- **AWS Infrastructure (`ap-south-1`):** 1 × `m7i-flex.large` (`2 vCPU, 8 GiB RAM`) EC2 instance (`i-00a1616bf3dee5989`), 40 GB encrypted `gp3` EBS, **SSH port `22` closed**, zero `0.0.0.0/0` ingress, IMDSv2 enforced (`hop_limit = 1`), all admin UIs strictly behind **AWS SSM Session Manager** port forwarding.
-- **GitHub Webhook CI/CD Trigger:** Webhook `#710422026` on `Ajay73588/vle9-secure-devsecops-healthcare` (`main`) -> **Jenkins Build `#4`** (`Result: SUCCESS`, all 10 declarative stages green).
-- **SonarQube SAST (`vle9-securecare`):** Quality Gate **`OK` (`Passed`)** — `0` Bugs, `0` Vulnerabilities, `0` Security Hotspots, `0` Code Smells, `94.6%` new-code coverage.
-- **Trivy Scan (`securecare:4`):** **`0` Vulnerabilities** across Alpine `3.24.4` (`19` OS pkgs) and `49` runtime Node.js packages; **`0`** Dockerfile/Kubernetes/Secret misconfigurations (6 Terraform lab architectural checks documented honestly in [SECURITY_REPORT.md](SECURITY_REPORT.md)).
+- **AWS Infrastructure (`ap-south-1`):** 1 × `m7i-flex.large` (`2 vCPU, 8 GiB RAM`) EC2 instance (`i-00a1616bf3dee5989`), 40 GB encrypted `gp3` EBS (`vol-06faea913396a3863`), **SSH port `22` blocked at AWS Security Group (`sg-0b7621a80ac7d5caa`)**, zero `0.0.0.0/0` ingress, IMDSv2 enforced (`hop_limit = 1`), all admin UIs bound strictly to `127.0.0.1` behind **AWS SSM Session Manager** port forwarding.
+- **GitHub Webhook CI/CD Trigger:** Webhook `#710422026` on `Ajay73588/vle9-secure-devsecops-healthcare` (`main`) -> **Jenkins Build `#5`** (`Result: SUCCESS`, `108.99s`, all 10 declarative stages green) and Build `#4` (`SUCCESS`, `101.84s`), following Build `#3` gate enforcement before remediation.
+- **SonarQube SAST (`vle9-securecare`):** Quality Gate **`OK` (`Passed`)** — `0` Bugs, `0` Vulnerabilities, `0` Security Hotspots, `0` Code Smells (`A` ratings), `94.6%` new-code coverage (`75.7%` combined, `1,751` NCLOC).
+- **Trivy Scan (`securecare:5`):** **`0` Vulnerabilities** across Alpine `3.24.4` (`19` OS pkgs) and runtime Node.js packages; **`0`** App/Dockerfile/Kubernetes/Secret misconfigurations (6 Terraform lab architectural checks documented honestly in [SECURITY_REPORT.md](SECURITY_REPORT.md)).
 - **Kubernetes Security (Minikube `v1.37.0`):** `namespace/securecare` enforcing **`restricted`** Pod Security Standard, `2/2` non-root pods (`UID 10001`, `readOnlyRootFilesystem: true`, `capabilities.drop: ["ALL"]`, `automountServiceAccountToken: false`), least-privilege `ServiceAccount`/`Role`/`RoleBinding`.
-- **OWASP ZAP DAST (`2.17.0`):** **`0` High**, **`0` Medium**, `1` Low (`COEP Header Missing` [90004]), `4` Informational.
-- **Monitoring & Alerting:** Prometheus (`5/5` targets `up`), Alertmanager (tested live `SecureCareUnauthorizedAccessSpike` firing to `/var/log/vle9-alerts.log`), Node Exporter, cAdvisor, and Grafana `VLE-9 SecureCare DevSecOps & Security Overview` dashboard.
+- **OWASP ZAP DAST (`2.17.0`):** **`0` High**, **`0` Medium**, `1` Low (`COEP Header Missing` `[90004]`), `4` Informational.
+- **Monitoring, Alerting & Stop/Resume:** Prometheus (`5/5` targets `up`), Alertmanager (`ready`, live `SecureCareAppDown`, `SecureCareUnauthorizedAccessSpike`, and `SecureCareFailedLoginSpike` delivered to `/var/log/vle9-alerts.log`), Grafana `VLE-9 SecureCare DevSecOps & Security Overview` (all 11 panels live), and full EC2 Stop/Resume auto-recovery verified.
 
 ---
 

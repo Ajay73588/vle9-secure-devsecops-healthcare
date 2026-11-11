@@ -1,21 +1,65 @@
 # VLE-9 Faculty Demonstration & Screen-Recording Guide
 
-> **Prerequisites Before Recording:** Ensure the EC2 instance (`i-00a1616bf3dee5989`) is running and SSM port-forwarding tunnels are open via `.\scripts\start-ssm-tunnels.ps1` (see `docs/STOP_AND_RESUME.md`).
+> **Prerequisites Before Recording:** Ensure EC2 instance `i-00a1616bf3dee5989` is `running` (do not stop/terminate before demo) and keep one PowerShell terminal running `.\scripts\start-ssm-tunnels.ps1` (see `docs/STOP_AND_RESUME.md`).
+
+---
+
+## Final Recording Checklist (Pre-Flight + Exact URLs & Commands)
+
+### A. Open Encrypted AWS SSM Tunnels (PowerShell on Windows)
+```powershell
+cd "C:\Users\LENOVO\Downloads\vle 9"
+.\scripts\start-ssm-tunnels.ps1
+```
+Keep this window open while recording. On machines where Docker Desktop/WSL2 occupies ports `8081`, `8080`, or `3000`, the script automatically prints `+10000` mapped ports:
+
+| Service | Default Local URL | Auto-Mapped Fallback URL (if default port busy) | Username |
+|---|---|---|---|
+| **SecureCare App** | `http://127.0.0.1:8081` | `http://127.0.0.1:18081` | `dr.sharma` / `admin.securecare` / `nurse.patel` |
+| **Jenkins CI/CD** | `http://127.0.0.1:8080` | `http://127.0.0.1:18080` | `vle9admin` |
+| **SonarQube SAST** | `http://127.0.0.1:9000` | *(same unless busy)* | `admin` |
+| **Grafana** | `http://127.0.0.1:3000` | `http://127.0.0.1:13000` | `admin` |
+| **Prometheus** | `http://127.0.0.1:9090` | *(same unless busy)* | *(no login required)* |
+| **Alertmanager** | `http://127.0.0.1:9093` | *(same unless busy)* | *(no login required)* |
+
+### B. Retrieve Your Admin/Demo Passwords Safely Before Recording (Optional Interactive Shell Only)
+If you need to look up a credential before recording (never print passwords into shared screen recordings):
+```powershell
+# Start an interactive SSM shell on EC2:
+aws ssm start-session --target i-00a1616bf3dee5989 --region ap-south-1
+```
+Inside the private SSM shell:
+- Jenkins (`vle9admin`): `sudo cat /opt/vle9/secrets/jenkins_admin_password`
+- SonarQube (`admin`): `sudo cat /opt/vle9/secrets/sonarqube_admin_password`
+- Grafana (`admin`): `sudo cat /opt/vle9/monitoring/grafana_admin_password`
+- SecureCare roles (`ADMIN_PASS_ENV`, `DOCTOR_PASS_ENV`, `NURSE_PASS_ENV`):
+  `sudo -u jenkins -H bash -lc 'kubectl get secret securecare-secrets -n securecare -o jsonpath="{.data}"'` *(base64-decode locally as needed)*
+
+### C. Pre-Flight Recording Commands (Quick Terminal Proof)
+Run in SSM shell to verify live cluster & reports on camera:
+```bash
+sudo -u jenkins -H bash -lc 'minikube status && kubectl get nodes && kubectl get ns securecare --show-labels && kubectl get all,sa,role,rolebinding -n securecare'
+sudo -u jenkins -H bash -lc 'kubectl auth can-i --as=system:serviceaccount:securecare:securecare-sa get configmaps/securecare-config -n securecare; kubectl auth can-i --as=system:serviceaccount:securecare:securecare-sa list secrets -n securecare'
+curl -fsS http://127.0.0.1:8081/health && echo
+cat /opt/vle9/reports/sonarqube-qg-5.json && echo
+head -n 30 /opt/vle9/reports/trivy/trivy-gate-5.txt
+cat /opt/vle9/reports/zap/latest-zap-summary.md
+```
 
 ---
 
 ## Step-by-Step Recording Workflow (9 Checkpoints)
 
-### 1. SecureCare Healthcare Application (`http://127.0.0.1:8081`)
+### 1. SecureCare Healthcare Application (`http://127.0.0.1:8081` or `:18081`)
 - Show the **Sign-In Portal** (RBAC protected, zero hardcoded credentials in frontend JS).
 - Log in as `dr.sharma` (Doctor role) or `admin.securecare` (Admin role).
 - Show the **KPI Dashboard** (Synthetic Patients, Outpatient Appointments, Active Departments, Session Role).
 - Demonstrate creating a **new synthetic patient** (e.g. `Diya Sen (Synthetic)`) and triggering an **input validation rejection** (e.g. entering `<script>` tags shows safe validation error `400`).
 - Highlight the **100% Synthetic Data Only (Zero Real PHI)** badge and masked contact numbers.
 
-### 2. Jenkins Successful 10-Stage Pipeline (`http://127.0.0.1:8080` or mapped local SSM port)
+### 2. Jenkins Successful 10-Stage Pipeline (`http://127.0.0.1:8080` or `:18080`)
 - Open the `vle9-securecare-pipeline` job in Jenkins.
-- Click **Full Stage View** to display Build `#4` with all 10 green stages (and optionally point out Build `#3` stopping cleanly at Stage 7 before remediation):
+- Click **Full Stage View** to display Build `#5` (`108.99s`) and `#4` (`101.84s`) with all 10 green stages (and optionally point out Build `#3` stopping cleanly at Stage 7 before remediation):
   1. Checkout Source Code
   2. Install Dependencies
   3. Run Application Tests

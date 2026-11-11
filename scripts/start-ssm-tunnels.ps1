@@ -5,24 +5,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Test-LocalPortBusy([int]$Port) {
-  try {
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    $ar = $tcp.BeginConnect("127.0.0.1", $Port, $null, $null)
-    if ($ar.AsyncWaitHandle.WaitOne(150) -and $tcp.Connected) {
-      $tcp.Close()
-      return $true
-    }
-    $tcp.Close()
-  } catch {}
-  return $false
+function Get-ListeningPorts {
+  return [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() |
+    ForEach-Object { $_.Port } |
+    Select-Object -Unique
 }
 
-function Get-FreeLocalPort([int]$PreferredPort) {
+function Get-FreeLocalPort([int]$PreferredPort, [int[]]$ReservedPorts) {
+  $busy = (Get-ListeningPorts) + $ReservedPorts
   $candidate = $PreferredPort
-  if (Test-LocalPortBusy $candidate) {
+  if ($busy -contains $candidate) {
     $candidate = $PreferredPort + 10000
-    while (Test-LocalPortBusy $candidate) {
+    while ($busy -contains $candidate) {
       $candidate++
     }
   }
@@ -44,14 +38,22 @@ if (-not $InstanceId -or $InstanceId -eq "None") {
 
 Write-Host "Starting AWS SSM Port Forwarding tunnels for instance $InstanceId ($Region)..." -ForegroundColor Cyan
 
-$tunnels = @(
-  @{ Name = "SecureCare";   Remote = 8081; Local = (Get-FreeLocalPort 8081); Preferred = 8081 },
-  @{ Name = "Jenkins";      Remote = 8080; Local = (Get-FreeLocalPort 8080); Preferred = 8080 },
-  @{ Name = "SonarQube";    Remote = 9000; Local = (Get-FreeLocalPort 9000); Preferred = 9000 },
-  @{ Name = "Grafana";      Remote = 3000; Local = (Get-FreeLocalPort 3000); Preferred = 3000 },
-  @{ Name = "Prometheus";   Remote = 9090; Local = (Get-FreeLocalPort 9090); Preferred = 9090 },
-  @{ Name = "Alertmanager"; Remote = 9093; Local = (Get-FreeLocalPort 9093); Preferred = 9093 }
+$specs = @(
+  @{ Name = "SecureCare";   Remote = 8081; Preferred = 8081 },
+  @{ Name = "Jenkins";      Remote = 8080; Preferred = 8080 },
+  @{ Name = "SonarQube";    Remote = 9000; Preferred = 9000 },
+  @{ Name = "Grafana";      Remote = 3000; Preferred = 3000 },
+  @{ Name = "Prometheus";   Remote = 9090; Preferred = 9090 },
+  @{ Name = "Alertmanager"; Remote = 9093; Preferred = 9093 }
 )
+
+$reserved = @()
+$tunnels = @()
+foreach ($s in $specs) {
+  $localPort = Get-FreeLocalPort -PreferredPort $s.Preferred -ReservedPorts $reserved
+  $reserved += $localPort
+  $tunnels += @{ Name = $s.Name; Remote = $s.Remote; Local = $localPort; Preferred = $s.Preferred }
+}
 
 $procs = @()
 try {
@@ -68,20 +70,25 @@ try {
     $psi.RedirectStandardInput = $true
     $psi.CreateNoWindow = $true
     $procs += [System.Diagnostics.Process]::Start($psi)
+    Start-Sleep -Milliseconds 400
   }
 
-  $deadline = [DateTime]::UtcNow.AddSeconds(35)
-  foreach ($t in $tunnels) {
-    $ready = $false
-    while ([DateTime]::UtcNow -lt $deadline) {
-      if (Test-LocalPortBusy $t.Local) {
-        $ready = $true
-        break
+  $deadline = [DateTime]::UtcNow.AddSeconds(45)
+  $openPorts = @{}
+  while ([DateTime]::UtcNow -lt $deadline -and $openPorts.Count -lt $tunnels.Count) {
+    $listening = Get-ListeningPorts
+    foreach ($t in $tunnels) {
+      if (-not $openPorts.ContainsKey($t.Name) -and ($listening -contains $t.Local)) {
+        $openPorts[$t.Name] = $true
       }
+    }
+    if ($openPorts.Count -lt $tunnels.Count) {
       Start-Sleep -Milliseconds 300
     }
-    if (-not $ready) {
-      Write-Warning "Tunnel for $($t.Name) (127.0.0.1:$($t.Local)) did not open within 35s."
+  }
+  foreach ($t in $tunnels) {
+    if (-not $openPorts.ContainsKey($t.Name)) {
+      Write-Warning "Tunnel for $($t.Name) (127.0.0.1:$($t.Local)) did not bind within 45s."
     }
   }
 
@@ -92,10 +99,7 @@ try {
 } finally {
   foreach ($proc in $procs) {
     if ($proc) {
-      $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue
-      foreach ($c in $children) {
-        Stop-Process -Id $c.ProcessId -Force -ErrorAction SilentlyContinue
-      }
+      cmd /c "taskkill /PID $($proc.Id) /T /F >nul 2>&1"
       if (-not $proc.HasExited) {
         $proc.Kill()
       }

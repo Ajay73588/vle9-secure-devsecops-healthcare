@@ -70,4 +70,4 @@ Healthcare applications handle **Protected Health Information (PHI)** (patient d
 1. Developer pushes code to GitHub (`Ajay73588/vle9-secure-devsecops-healthcare`).
 2. GitHub sends `POST /github-webhook/` from an official GitHub webhook CIDR through AWS Security Group (port 80 restricted) -> Nginx (denies every path except `/github-webhook/`) -> Jenkins (`127.0.0.1:8080`).
 3. Jenkins executes 10 stages: Checkout -> `npm ci` -> `npm test` -> SonarQube SAST -> Docker Build -> Trivy Scan -> Security Gates -> Minikube K8s Deploy -> OWASP ZAP Baseline DAST -> Live Health & Prometheus Target Verification.
-4. All admin UIs (Jenkins, SonarQube, Grafana, Prometheus, SecureCare) remain closed to the public internet (**SSH port 22 closed**) and are accessed strictly via **AWS Systems Manager (SSM)** encrypted port forwarding.
+4. All admin UIs (Jenkins, SonarQube, Grafana, Prometheus, SecureCare) remain closed to the public internet (**SSH port 22 blocked at AWS SG perimeter**) and are accessed strictly via **AWS Systems Manager (SSM)** encrypted port forwarding (`.\scripts\start-ssm-tunnels.ps1`).

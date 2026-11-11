@@ -1,8 +1,8 @@
 # VLE-9 Security Assessment & Remediation Report (`SecureCare`)
 
 **Project:** VLE-9 — Secure DevSecOps Implementation in Healthcare Systems  
-**Verified Pipeline Build:** Jenkins Build `#4` (`Result: SUCCESS`, triggered automatically by GitHub push delivery `3853471628499386368`)  
-**Assessment Scope:** AWS Infrastructure (`ap-south-1`), Docker Container Image (`securecare:4`), SecureCare Application Codebase, Kubernetes Deployment (`securecare` namespace on Minikube `v1.37.0`), Static Analysis (SonarQube `9.9.8`), Supply-Chain/IaC Scanning (Trivy), Dynamic Testing (OWASP ZAP `2.17.0`), and Live Runtime Security Telemetry.
+**Verified Pipeline Builds:** Jenkins Build `#5` (`Result: SUCCESS`, triggered by GitHub push delivery `3853481013493628928`) and Build `#4` (`Result: SUCCESS`, delivery `3853471628499386368`)  
+**Assessment Scope:** AWS Infrastructure (`ap-south-1`), Docker Container Image (`securecare:5`), SecureCare Application Codebase, Kubernetes Deployment (`securecare` namespace on Minikube `v1.37.0`), Static Analysis (SonarQube `9.9.8`), Supply-Chain/IaC Scanning (Trivy), Dynamic Testing (OWASP ZAP `2.17.0`), and Live Runtime Security Telemetry.
 
 ---
 
@@ -11,11 +11,11 @@
 | Security Gate / Control | Tool / Mechanism | Final Verified Status | Critical / High Findings |
 |---|---|---|---|
 | **SAST (Static Code Analysis)** | SonarQube Community `9.9.8` + `sonar-scanner` | **PASSED (`OK`)** | `0` Bugs, `0` Vulnerabilities, `0` Security Hotspots, `0` Code Smells |
-| **Container Image Scan** | Trivy (`trivy image securecare:4`) | **PASSED (`Exit Code: 0`)** | `0` Vulnerabilities across Alpine `3.24.4` (19 OS pkgs) & 49 Node.js runtime pkgs |
+| **Container Image Scan** | Trivy (`trivy image securecare:5`) | **PASSED (`Exit Code: 0`)** | `0` Vulnerabilities across Alpine `3.24.4` (19 OS pkgs) & runtime Node.js pkgs |
 | **Repository & IaC Scan** | Trivy FS (`vuln,misconfig,secret`) | **PASS (App/K8s/Docker Clean); 6 Accepted Terraform Items** | `0` `package-lock.json` CVEs, `0` Dockerfile/K8s misconfigs, `0` Secrets; 6 Terraform architectural items documented below |
 | **DAST (Dynamic App Security)** | OWASP ZAP `2.17.0` Baseline (`http://127.0.0.1:8081`) | **PASSED (`High: 0`)** | `0` High, `0` Medium, `1` Low (`COEP` Header `[90004]`), `4` Informational |
 | **Kubernetes Workload Security** | Pod Security Standard `restricted` + Least-Privilege RBAC | **ENFORCED & VERIFIED** | UID `10001` non-root, `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `drop: ["ALL"]`, `automountServiceAccountToken: false` |
-| **Cloud & Network Isolation** | AWS SG + Nginx + Systems Manager (SSM) + IMDSv2 | **VERIFIED** | SSH port `22` closed, zero `0.0.0.0/0` ingress, admin UIs bound strictly to `127.0.0.1`, IMDSv2 `hop_limit = 1` |
+| **Cloud & Network Isolation** | AWS SG (`sg-0b7621a80ac7d5caa`) + Nginx + Systems Manager (SSM) + IMDSv2 | **VERIFIED** | TCP `22` blocked at AWS SG perimeter (`tcp/80` GitHub webhook CIDRs only), zero `0.0.0.0/0` ingress, admin UIs bound strictly to `127.0.0.1`, IMDSv2 `hop_limit = 1` |
 
 ---
 
@@ -36,7 +36,7 @@ One of the primary goals of DevSecOps is catching real weaknesses via automated 
 
 ---
 
-## 3. Detailed Security Scan Results (Jenkins Build #4)
+## 3. Detailed Security Scan Results (Latest Verified Builds `#4` / `#5`)
 
 ### 3.1 SonarQube SAST Results (`vle9-securecare`)
 - **Quality Gate Status:** `OK` (`Passed`)
@@ -45,13 +45,13 @@ One of the primary goals of DevSecOps is catching real weaknesses via automated 
   - **Vulnerabilities:** `0` (Rating **A**)
   - **Security Hotspots:** `0` (Rating **A**)
   - **Code Smells:** `0` (Rating **A**)
-  - **New Code Coverage:** `94.6%` (`77.3%` overall line coverage; `75.7%` combined coverage)
+  - **New Code Coverage:** `94.6%` (`75.7%` combined coverage)
   - **New Duplicated Lines Density:** `0.0%` (`3.1%` overall)
 
-### 3.2 Trivy Image & Filesystem Results (`securecare:4`)
-- **Container Image (`securecare:4`, `alpine 3.24.4`):**
+### 3.2 Trivy Image & Filesystem Results (`securecare:5`)
+- **Container Image (`securecare:5`, `alpine 3.24.4`):**
   - OS Packages scanned: `19` -> **`0` Vulnerabilities**
-  - Runtime Node.js packages scanned: `49` -> **`0` Vulnerabilities**
+  - Runtime Node.js packages (`app/node_modules`) -> **`0` Vulnerabilities**
   - Policy Gate (`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`): **Exit Code `0` (PASS)**
 - **Filesystem / Secrets / Config Scan (`trivy fs`):**
   - `app/package-lock.json` (`npm`): `0` vulnerabilities

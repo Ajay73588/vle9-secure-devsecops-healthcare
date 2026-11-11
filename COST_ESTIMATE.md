@@ -37,6 +37,7 @@ Inspecting `aws ec2 describe-instance-types --region ap-south-1 --filters "Name=
 | **Total Standard List Cost** | | | **~\$0.1058 / hr** | **~\$80.85 / mo** (if 24/7) | **~\$3.65 / mo** |
 
 ### Realistic Lab Usage Cost (Recommended Stop/Resume Pattern)
+- **Tested Stop/Resume Behavior (`i-00a1616bf3dee5989`):** Stopping EC2 transitioned state to `stopped` (`PublicIp: null`), halting compute + IPv4 hourly charges while preserving the 40 GB encrypted `gp3` EBS volume (`vol-06faea913396a3863`); resuming restored SSM `Online` status and auto-started all services on reboot.
 - **Active Lab / Demo Time (e.g., 15 hours total this month):**
   - Compute + Ephemeral Public IPv4 (list rate): `15 hrs × $0.1058/hr = $1.59` (may be offset by Free Plan credits if unused, though never assumed)
   - Monthly EBS Storage (40 GB `gp3`): `$3.65`
