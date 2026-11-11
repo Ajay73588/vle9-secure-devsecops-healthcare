@@ -171,4 +171,58 @@ describe('SecureCare Healthcare Application Security & Functional Suite', () => 
     });
     assert.equal(allowDelete.status, 200);
   });
+
+  it('supports dashboard summary, patient updates, appointment status workflow, cookie auth, and safe error handling', async () => {
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dr.sharma', password: testEnv.DOCTOR_PASS_ENV }),
+    });
+    assert.equal(loginRes.status, 200);
+    const setCookie = loginRes.headers.get('set-cookie') || '';
+    const cookiePair = setCookie.split(';')[0];
+    assert.ok(cookiePair.startsWith('securecare_session='));
+
+    const cookieHeaders = { Cookie: cookiePair, 'Content-Type': 'application/json' };
+
+    const meRes = await fetch(`${baseUrl}/api/auth/me`, { headers: cookieHeaders });
+    assert.equal(meRes.status, 200);
+    const meJson = await meRes.json();
+    assert.equal(meJson.user.role, 'doctor');
+
+    const summaryRes = await fetch(`${baseUrl}/api/dashboard/summary`, { headers: cookieHeaders });
+    assert.equal(summaryRes.status, 200);
+    const summary = await summaryRes.json();
+    assert.ok(summary.totalPatients >= 5);
+
+    const patchPatient = await fetch(`${baseUrl}/api/patients/SC-1001`, {
+      method: 'PATCH',
+      headers: cookieHeaders,
+      body: JSON.stringify({ summaryNote: 'Updated synthetic cardiology note' }),
+    });
+    assert.equal(patchPatient.status, 200);
+
+    const getAppts = await fetch(`${baseUrl}/api/appointments?status=Scheduled`, { headers: cookieHeaders });
+    assert.equal(getAppts.status, 200);
+
+    const patchAppt = await fetch(`${baseUrl}/api/appointments/APT-5001/status`, {
+      method: 'PATCH',
+      headers: cookieHeaders,
+      body: JSON.stringify({ status: 'Checked-In' }),
+    });
+    assert.equal(patchAppt.status, 200);
+
+    const malformed = await fetch(`${baseUrl}/api/patients`, {
+      method: 'POST',
+      headers: cookieHeaders,
+      body: '{bad-json',
+    });
+    assert.equal(malformed.status, 400);
+
+    const notFound = await fetch(`${baseUrl}/api/unknown-route`, { headers: cookieHeaders });
+    assert.equal(notFound.status, 404);
+
+    const logoutRes = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: cookieHeaders });
+    assert.equal(logoutRes.status, 200);
+  });
 });

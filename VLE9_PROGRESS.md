@@ -4,18 +4,12 @@
 
 | Phase | Description | Status | Notes |
 |---|---|---|---|
-| **Phase 1** | Environment & AWS Diagnostics (`ap-south-1`) | **Completed** | Verified AWS CLI, Terraform v1.16.3, WSL2 Ansible 2.20.1, Node v24.17.0, GitHub token scopes, `ap-south-1` quotas & live AWS pricing. |
-| **Phase 2** | Project Structure & Core Docs | **Completed** | Created all required directories, `.gitignore`, `README.md`, `ARCHITECTURE.md`, `COST_ESTIMATE.md`. |
-| **Phase 3** | Secure AWS Infrastructure (`terraform/`) | **Awaiting Approval** | `terraform fmt`, `init`, `validate`, and `plan` succeeded (`24 to add, 0 to change, 0 to destroy`). Waiting for consolidated cost & provisioning approval before `terraform apply`. |
-| **Phase 4** | Ansible Automation (`ansible/`) | **Ready / Syntax Verified** | Created 7 modular roles (`common`, `docker`, `jenkins`, `sonarqube`, `security_tools`, `kubernetes`, `monitoring`); `ansible-playbook --syntax-check` passed. |
-| **Phase 5** | SecureCare Healthcare App (`app/`) | **Implemented & Tested** | Synthetic data portal with RBAC, scrypt hashing, HMAC auth, strict CSP, validation, `/metrics`; `npm test` passed 4/4 tests locally. |
-| **Phase 6** | SonarQube SAST Integration | **Configured / Pending Run** | `sonarqube/docker-compose.yml` and `sonar-project.properties` created; awaits EC2 deployment. |
-| **Phase 7** | Secure Docker & Trivy (`docker/`, `trivy/`) | **Configured / Pending Run** | Multi-stage non-root Alpine Dockerfile & Trivy policy created; awaits EC2 build & scan. |
-| **Phase 8** | Kubernetes Manifests (`kubernetes/`) | **Created / Pending Deploy** | Restricted PSS namespace, RBAC, ConfigMap, Deployment, NodePort Service created; awaits Minikube deployment. |
-| **Phase 9** | OWASP ZAP DAST (`zap/`) | **Configured / Pending Run** | Baseline scan integrated into `Jenkinsfile`; awaits live target verification. |
-| **Phase 10** | Prometheus & Grafana (`prometheus/`, `grafana/`, `monitoring/`) | **Configured / Pending Run** | Scrape config, 6 alert rules, Alertmanager, and provisioned Grafana dashboard created; awaits live verification. |
-| **Phase 11** | Jenkins Secure CI/CD (`jenkins/`) | **Configured / Pending Run** | 10-stage declarative `Jenkinsfile` created; awaits Jenkins deployment & GitHub webhook execution. |
-| **Phase 12** | End-to-End Verification | **Pending** | Runs after live deployment & pipeline execution. |
-| **Phase 13** | GitHub Repo & Webhook | **Pending** | Repo `Ajay73588/vle9-secure-devsecops-healthcare` verified available; will create, push, and configure webhook. |
-| **Phase 14** | Faculty Demo, Screenshots & Stop/Resume | **Pending** | Will prepare live screenshots, `docs/FACULTY_DEMO.md`, viva prep, and `docs/STOP_AND_RESUME.md`. |
-
+| **Phase 1** | Recover & Verify AWS Infrastructure (`ap-south-1`) | **Completed** | Reconciled partial state without duplicates; launched `m7i-flex.large` (`i-00a1616bf3dee5989`), encrypted 40 GB `gp3` EBS (`vol-06faea913396a3863`), restricted SG (`sg-0b7621a80ac7d5caa`, SSH 22 closed, GitHub webhook CIDRs only on TCP 80), IAM SSM profile, SSM `Online`. |
+| **Phase 2** | Ansible Automation (`ansible/`) | **In Progress** | Testing `amazon.aws.aws_ssm` connectivity and executing all 7 roles (`common`, `docker`, `jenkins`, `sonarqube`, `security_tools`, `kubernetes`, `monitoring`). |
+| **Phase 3** | SecureCare Application (`app/`) | **Tested Locally / Pending Container & K8s** | 4/4 local unit tests passing; Docker image & K8s deployment next. |
+| **Phase 4** | Security Testing (SonarQube, Trivy, OWASP ZAP) | **Pending** | Runs after Ansible installs tools and Jenkins pipeline executes. |
+| **Phase 5** | Kubernetes Deployment (Minikube) | **Pending** | Restricted PSS namespace, RBAC, Secrets, Deployment, NodePort Service. |
+| **Phase 6** | Jenkins CI/CD & GitHub Integration | **Completed Repo / Pending Pipeline** | Created & pushed `Ajay73588/vle9-secure-devsecops-healthcare`; webhook & pipeline run next. |
+| **Phase 7** | Monitoring (Prometheus, Alertmanager, Grafana) | **Pending** | Configured; awaits live target & alert verification. |
+| **Phase 8** | End-to-End Verification | **Pending** | Full PASS/FAIL verification matrix after pipeline run. |
+| **Phase 9** | Documentation, Screenshots & Stop/Resume | **In Progress** | `COST_ESTIMATE.md`, `ARCHITECTURE.md`, `VIVA_QUESTIONS.md`, `STOP_AND_RESUME.md`, `FACULTY_DEMO.md` drafted; screenshots & `TEST_RESULTS.md`/`SECURITY_REPORT.md` pending live run. |

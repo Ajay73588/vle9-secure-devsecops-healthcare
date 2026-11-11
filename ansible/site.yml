@@ -1,9 +1,11 @@
 ---
 - name: Configure VLE-9 Secure DevSecOps Healthcare Platform
   hosts: devsecops
+  gather_facts: false
   become: true
   vars:
     vle9_base_dir: /opt/vle9
+    ubuntu_codename: noble
     sonar_scanner_version: "6.2.1.4610"
   roles:
     - common

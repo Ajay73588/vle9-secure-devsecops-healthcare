@@ -5,6 +5,6 @@ vle9-ec2 ansible_host=<EC2_INSTANCE_ID>
 ansible_connection=amazon.aws.aws_ssm
 ansible_aws_ssm_region=ap-south-1
 ansible_aws_ssm_bucket_name=<SSM_TRANSFER_BUCKET_NAME>
-ansible_user=ubuntu
+ansible_user=ssm-user
 ansible_python_interpreter=/usr/bin/python3
 

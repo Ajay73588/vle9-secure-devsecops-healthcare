@@ -121,12 +121,18 @@
     group: ubuntu
     mode: "0640"
 
-- name: Install required Jenkins plugins via jenkins-plugin-cli
+- name: Install required Jenkins plugins via jenkins-plugin-manager
   ansible.builtin.shell: |
     set -euo pipefail
     if [ ! -f /var/lib/jenkins/vle9-plugins.done ]; then
-      jenkins-plugin-cli --plugin-download-directory /var/lib/jenkins/plugins --plugins \
-        git github workflow-aggregator pipeline-stage-view sonar credentials-binding ws-cleanup ansicolor
+      mkdir -p /var/lib/jenkins/plugins /usr/local/lib
+      if [ ! -f /usr/local/lib/jenkins-plugin-manager.jar ]; then
+        curl -fsSL "https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/2.13.2/jenkins-plugin-manager-2.13.2.jar" -o /usr/local/lib/jenkins-plugin-manager.jar
+      fi
+      java -jar /usr/local/lib/jenkins-plugin-manager.jar \
+        --war /usr/share/java/jenkins.war \
+        --plugin-download-directory /var/lib/jenkins/plugins \
+        --plugins git github workflow-aggregator pipeline-stage-view sonar credentials-binding ws-cleanup ansicolor
       chown -R jenkins:jenkins /var/lib/jenkins/plugins
       touch /var/lib/jenkins/vle9-plugins.done
       chown jenkins:jenkins /var/lib/jenkins/vle9-plugins.done
