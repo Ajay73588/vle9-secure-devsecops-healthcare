@@ -87,11 +87,15 @@ pipeline {
       }
     }
 
-    stage('6. Run Trivy Image Scan') {
+    stage('6. Run Trivy FS & Image Scan') {
       steps {
         sh '''
           set -euo pipefail
           mkdir -p "${REPORT_DIR}/trivy"
+          trivy fs --no-progress --scanners vuln,misconfig,secret --format table . | tee "${REPORT_DIR}/trivy/trivy-fs-${BUILD_NUMBER}.txt"
+          trivy fs --no-progress --scanners vuln,misconfig,secret --format json -o "${REPORT_DIR}/trivy/trivy-fs-${BUILD_NUMBER}.json" .
+          cp -f "${REPORT_DIR}/trivy/trivy-fs-${BUILD_NUMBER}.txt" "${REPORT_DIR}/trivy/latest-trivy-fs.txt"
+
           trivy image --no-progress --format table "${APP_IMAGE}" | tee "${REPORT_DIR}/trivy/trivy-table-${BUILD_NUMBER}.txt"
           trivy image --no-progress --format json -o "${REPORT_DIR}/trivy/trivy-report-${BUILD_NUMBER}.json" "${APP_IMAGE}"
           cp -f "${REPORT_DIR}/trivy/trivy-table-${BUILD_NUMBER}.txt" "${REPORT_DIR}/trivy/latest-trivy-table.txt"
@@ -151,8 +155,7 @@ pipeline {
               --from-literal=NURSE_PASS_ENV="${NURSE_PASS_ENV}" \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            kubectl apply -f kubernetes/04-deployment.yaml
-            kubectl set image deployment/securecare securecare="${APP_IMAGE}" -n "${K8S_NAMESPACE}"
+            sed "s|securecare:latest|${APP_IMAGE}|g" kubernetes/04-deployment.yaml | kubectl apply -f -
             kubectl apply -f kubernetes/05-service.yaml
 
             kubectl rollout status deployment/securecare -n "${K8S_NAMESPACE}" --timeout=120s
