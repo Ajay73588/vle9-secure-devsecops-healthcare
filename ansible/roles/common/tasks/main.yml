@@ -18,8 +18,14 @@
       - apt-transport-https
       - nginx
       - fontconfig
-      - openjdk-17-jre-headless
+      - openjdk-21-jre-headless
     state: present
+
+- name: Ensure obsolete Java 17 package is absent so Java 21 is default
+  ansible.builtin.apt:
+    name: openjdk-17-jre-headless
+    state: absent
+    autoremove: true
 
 - name: Install Node.js 22 LTS from NodeSource for local CI helper checks
   ansible.builtin.shell: |
