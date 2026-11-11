@@ -113,8 +113,8 @@
       "fieldConfig": { "defaults": { "unit": "bytes" } },
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
       "id": 8,
-      "targets": [{ "expr": "topk(8, container_memory_working_set_bytes{name!=\"\"})", "legendFormat": "{{name}}", "refId": "A" }],
-      "title": "Top Container & Minikube Memory Working Set",
+      "targets": [{ "expr": "topk(6, label_replace(label_replace(label_replace(container_memory_working_set_bytes{id=~\"/system\\\\.slice/(jenkins|docker|containerd|nginx)\\\\.service|/system\\\\.slice/snap\\\\.amazon-ssm-agent.*|/system\\\\.slice/docker-[^/]+\\\\.scope/(kubepods|system)\\\\.slice\"}, \"unit\", \"$1\", \"id\", \"^/system\\\\.slice/(.+)$\"), \"unit\", \"minikube/$1\", \"unit\", \"^docker-[^/]+\\\\.scope/(.+)$\"), \"unit\", \"ssm-agent.service\", \"unit\", \"^snap\\\\.amazon-ssm-agent.*$\"))", "legendFormat": "{{unit}}", "refId": "A" }],
+      "title": "Top Service & Minikube Memory Working Set",
       "type": "timeseries"
     },
     {

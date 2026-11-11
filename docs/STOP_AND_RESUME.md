@@ -59,17 +59,27 @@ aws ssm describe-instance-information --filters "Key=InstanceIds,Values=i-00a161
 .\scripts\start-ssm-tunnels.ps1
 ```
 
-5. Open in your browser (via local SSM tunnels):
-   - **SecureCare App:** `http://127.0.0.1:8081`
-   - **Jenkins CI/CD:** `http://127.0.0.1:8080`
+5. Open in your browser (via the printed URLs from `start-ssm-tunnels.ps1`; if any local port like `8081`, `8080`, or `3000` is occupied on Windows, the script automatically maps `+10000`, e.g., `18081` / `18080` / `13000`):
+   - **SecureCare App:** `http://127.0.0.1:8081` *(or `18081` if busy)*
+   - **Jenkins CI/CD:** `http://127.0.0.1:8080` *(or `18080` if busy)*
    - **SonarQube SAST:** `http://127.0.0.1:9000`
-   - **Grafana Dashboard:** `http://127.0.0.1:3000`
+   - **Grafana Dashboard:** `http://127.0.0.1:3000` *(or `13000` if busy)*
    - **Prometheus Targets:** `http://127.0.0.1:9090/targets`
 
-6. Verify services over SSM from PowerShell:
+6. Verify services over SSM from PowerShell (writing a BOM-less JSON file avoids Windows PowerShell quote stripping):
 
 ```powershell
-aws ssm send-command --instance-ids i-00a1616bf3dee5989 --region ap-south-1 `
-  --document-name "AWS-RunShellScript" `
-  --parameters 'commands=["systemctl is-active jenkins docker nginx vle9-minikube","docker ps --format \"table {{.Names}}\\t{{.Status}}\"","su -s /bin/bash jenkins -c \"HOME=/var/lib/jenkins kubectl get pods -n securecare\"","curl -fsS http://127.0.0.1:8081/health"]'
+$p = @{ commands = @(
+  'systemctl is-active jenkins docker nginx vle9-minikube vle9-alert-sink',
+  'docker ps --format "table {{.Names}}\t{{.Status}}"',
+  'su -s /bin/bash jenkins -c "HOME=/var/lib/jenkins kubectl get pods -n securecare"',
+  'curl -fsS http://127.0.0.1:8081/health'
+) } | ConvertTo-Json
+$tmp = Join-Path $env:TEMP "vle9-verify.json"
+[System.IO.File]::WriteAllText($tmp, $p, [System.Text.UTF8Encoding]::new($false))
+$cid = aws ssm send-command --instance-ids i-00a1616bf3dee5989 --region ap-south-1 --document-name "AWS-RunShellScript" --parameters "file://$tmp" --query "Command.CommandId" --output text
+Start-Sleep -Seconds 4
+aws ssm get-command-invocation --command-id $cid --instance-id i-00a1616bf3dee5989 --region ap-south-1 --query "{Status:Status,Stdout:StandardOutputContent}" --output json
+Remove-Item -Force $tmp -ErrorAction SilentlyContinue
 ```
+
