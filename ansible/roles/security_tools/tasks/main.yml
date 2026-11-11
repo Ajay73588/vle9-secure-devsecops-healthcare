@@ -1,0 +1,28 @@
+---
+- name: Download Aqua Security Trivy GPG key
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -f /etc/apt/keyrings/trivy.gpg ]; then
+      curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor -o /etc/apt/keyrings/trivy.gpg
+      chmod 644 /etc/apt/keyrings/trivy.gpg
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Add Aqua Security Trivy APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main"
+    filename: trivy
+    state: present
+
+- name: Install Trivy vulnerability scanner
+  ansible.builtin.apt:
+    update_cache: true
+    name: trivy
+    state: present
+
+- name: Pre-pull OWASP ZAP stable container image for DAST scanning
+  ansible.builtin.command: docker pull ghcr.io/zaproxy/zaproxy:stable
+  changed_when: false
+

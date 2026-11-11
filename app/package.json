@@ -1,0 +1,28 @@
+{
+  "name": "securecare-healthcare",
+  "version": "1.0.0",
+  "description": "SecureCare - Synthetic Healthcare Records & Appointment Management System for VLE-9 DevSecOps",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.js"
+  },
+  "keywords": [
+    "healthcare",
+    "devsecops",
+    "security",
+    "prometheus",
+    "synthetic-data"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "prom-client": "^15.1.3"
+  }
+}
+

@@ -1,0 +1,53 @@
+# Secrets, credentials, and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.ppk
+*.crt
+*.p12
+*.pfx
+secrets/
+**/secrets.yaml
+**/03-secret.yaml
+!*secret*.example.yaml
+*credentials*
+*token*
+
+# Terraform state and local cache
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/tfplan
+terraform/*.tfvars
+!terraform/*.tfvars.example
+
+# Ansible retry / vault / dynamic outputs
+ansible/*.retry
+ansible/.vault_pass
+ansible/inventory.ini
+ansible/inventory.generated.ini
+
+# Node / Application artifacts
+app/node_modules/
+app/coverage/
+app/*.log
+*.log
+npm-debug.log*
+
+# Scan & pipeline local outputs (kept out of git if sensitive or transient; curated sanitized reports go in docs/ or screenshots/)
+trivy/*.json
+zap/*.html
+zap/*.json
+zap/zap.yaml
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

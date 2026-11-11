@@ -1,0 +1,7 @@
+aws_region           = "ap-south-1"
+availability_zone    = "ap-south-1a"
+instance_type        = "m7i-flex.large"
+root_volume_size_gb  = 40
+vpc_cidr             = "10.90.0.0/16"
+public_subnet_cidr   = "10.90.1.0/24"
+

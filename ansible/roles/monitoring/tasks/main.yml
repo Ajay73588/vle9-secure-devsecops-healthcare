@@ -1,0 +1,86 @@
+---
+- name: Copy Prometheus configuration and alert rules
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: "{{ playbook_dir }}/../prometheus/prometheus.yml", dest: "{{ vle9_base_dir }}/prometheus/prometheus.yml" }
+    - { src: "{{ playbook_dir }}/../prometheus/alert_rules.yml", dest: "{{ vle9_base_dir }}/prometheus/alert_rules.yml" }
+    - { src: "{{ playbook_dir }}/../monitoring/alertmanager.yml", dest: "{{ vle9_base_dir }}/monitoring/alertmanager.yml" }
+    - { src: "{{ playbook_dir }}/../monitoring/docker-compose.yml", dest: "{{ vle9_base_dir }}/monitoring/docker-compose.yml" }
+    - { src: "{{ playbook_dir }}/../grafana/provisioning/datasources/prometheus.yml", dest: "{{ vle9_base_dir }}/grafana/provisioning/datasources/prometheus.yml" }
+    - { src: "{{ playbook_dir }}/../grafana/provisioning/dashboards/dashboards.yml", dest: "{{ vle9_base_dir }}/grafana/provisioning/dashboards/dashboards.yml" }
+    - { src: "{{ playbook_dir }}/../grafana/dashboards/securecare-devsecops.json", dest: "{{ vle9_base_dir }}/grafana/dashboards/securecare-devsecops.json" }
+
+- name: Generate random Grafana admin password secret file if absent
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -f "{{ vle9_base_dir }}/monitoring/grafana_admin_password" ]; then
+      openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20 > "{{ vle9_base_dir }}/monitoring/grafana_admin_password"
+      chown 472:472 "{{ vle9_base_dir }}/monitoring/grafana_admin_password"
+      chmod 400 "{{ vle9_base_dir }}/monitoring/grafana_admin_password"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Install lightweight localhost Alertmanager webhook receiver script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/vle9-alert-sink.py
+    mode: "0755"
+    content: |
+      #!/usr/bin/env python3
+      from http.server import BaseHTTPRequestHandler, HTTPServer
+      import datetime
+
+      LOG_FILE = "/var/log/vle9-alerts.log"
+
+      class AlertHandler(BaseHTTPRequestHandler):
+          def do_POST(self):
+              length = int(self.headers.get("Content-Length", 0))
+              body = self.rfile.read(length).decode("utf-8", errors="replace")
+              ts = datetime.datetime.utcnow().isoformat() + "Z"
+              with open(LOG_FILE, "a", encoding="utf-8") as f:
+                  f.write(f"[{ts}] {body}\n")
+              self.send_response(200)
+              self.end_headers()
+              self.wfile.write(b"ok")
+
+          def log_message(self, format, *args):
+              return
+
+      if __name__ == "__main__":
+          HTTPServer(("127.0.0.1", 9099), AlertHandler).serve_forever()
+
+- name: Configure systemd service for Alertmanager webhook sink
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vle9-alert-sink.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=VLE-9 Localhost Alertmanager Webhook Receiver
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 /usr/local/bin/vle9-alert-sink.py
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start vle9-alert-sink service
+  ansible.builtin.systemd:
+    name: vle9-alert-sink.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Start Prometheus, Alertmanager, Node Exporter, cAdvisor, and Grafana stack
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ vle9_base_dir }}/monitoring"
+  changed_when: false
+

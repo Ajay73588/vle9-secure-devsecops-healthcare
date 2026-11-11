@@ -1,0 +1,28 @@
+---
+- name: Copy SonarQube Docker Compose configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../sonarqube/docker-compose.yml"
+    dest: "{{ vle9_base_dir }}/sonarqube/docker-compose.yml"
+    mode: "0644"
+
+- name: Start SonarQube Community container via Docker Compose
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ vle9_base_dir }}/sonarqube"
+  changed_when: false
+
+- name: Install SonarScanner CLI
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -x /opt/sonar-scanner/bin/sonar-scanner ]; then
+      curl -fsSL "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-{{ sonar_scanner_version }}-linux-x64.zip" -o /tmp/sonar-scanner.zip
+      rm -rf /opt/sonar-scanner-tmp /opt/sonar-scanner
+      unzip -q /tmp/sonar-scanner.zip -d /opt/sonar-scanner-tmp
+      mv /opt/sonar-scanner-tmp/sonar-scanner-* /opt/sonar-scanner
+      rm -rf /opt/sonar-scanner-tmp /tmp/sonar-scanner.zip
+      ln -sf /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+

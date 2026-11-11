@@ -1,0 +1,15 @@
+---
+- name: Systemd daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart jenkins
+  ansible.builtin.systemd:
+    name: jenkins
+    state: restarted
+
+- name: Restart nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+

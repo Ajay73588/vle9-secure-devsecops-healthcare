@@ -1,0 +1,63 @@
+groups:
+  - name: securecare-infrastructure-and-security-alerts
+    rules:
+      - alert: SecureCareAppDown
+        expr: up{job="securecare-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "SecureCare healthcare application is DOWN"
+          description: "Prometheus cannot scrape SecureCare /metrics at 127.0.0.1:8081 for more than 1 minute."
+
+      - alert: HighHostCPUUsage
+        expr: (100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100)) > 80
+        for: 3m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High EC2 host CPU utilization (>80%)"
+          description: "Host CPU utilization has exceeded 80% for 3 minutes (current: {{ printf \"%.1f\" $value }}%)."
+
+      - alert: HighHostMemoryUsage
+        expr: ((1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100) > 88
+        for: 3m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High EC2 host memory utilization (>88%)"
+          description: "Available memory is low (current usage: {{ printf \"%.1f\" $value }}%)."
+
+      - alert: HighHostDiskUsage
+        expr: ((1 - (node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"})) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High root filesystem usage (>85%)"
+          description: "Root disk usage is above 85% (current: {{ printf \"%.1f\" $value }}%)."
+
+      - alert: SecureCareUnauthorizedAccessSpike
+        expr: sum(increase(securecare_unauthorized_access_total[5m])) >= 5
+        for: 0m
+        labels:
+          severity: high
+          category: security
+        annotations:
+          summary: "Unauthorized access spike detected in SecureCare"
+          description: "{{ $value }} HTTP 401/403 unauthorized access events occurred within the last 5 minutes."
+
+      - alert: SecureCareFailedLoginSpike
+        expr: sum(increase(securecare_auth_login_attempts_total{outcome="failure"}[5m])) >= 3
+        for: 0m
+        labels:
+          severity: high
+          category: security
+        annotations:
+          summary: "Multiple failed authentication attempts on SecureCare"
+          description: "{{ $value }} failed login attempts occurred in the last 5 minutes — possible credential stuffing or brute force."
+

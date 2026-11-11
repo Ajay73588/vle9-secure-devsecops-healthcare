@@ -1,0 +1,190 @@
+---
+- name: Download current official Jenkins 2026 GPG key
+  ansible.builtin.get_url:
+    url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+    dest: /etc/apt/keyrings/jenkins-keyring.asc
+    mode: "0644"
+
+- name: Add Jenkins LTS APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+    filename: jenkins
+    state: present
+
+- name: Install Jenkins LTS
+  ansible.builtin.apt:
+    update_cache: true
+    name: jenkins
+    state: present
+
+- name: Add jenkins user to docker group
+  ansible.builtin.user:
+    name: jenkins
+    groups: docker
+    append: true
+
+- name: Ensure report directories are writable by jenkins
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+  loop:
+    - "{{ vle9_base_dir }}/reports"
+    - "{{ vle9_base_dir }}/reports/trivy"
+
+- name: Ensure zap report directory allows container write access
+  ansible.builtin.file:
+    path: "{{ vle9_base_dir }}/reports/zap"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0777"
+
+- name: Create systemd drop-in directory for Jenkins hardening
+  ansible.builtin.file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    mode: "0755"
+
+- name: Bind Jenkins strictly to localhost 127.0.0.1 and tune JVM heap
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    mode: "0644"
+    content: |
+      [Service]
+      Environment="JENKINS_LISTEN_ADDRESS=127.0.0.1"
+      Environment="JENKINS_PORT=8080"
+      Environment="JAVA_OPTS=-Djava.awt.headless=true -Xms256m -Xmx768m -Djenkins.install.runSetupWizard=false"
+  notify:
+    - Systemd daemon-reload
+    - Restart jenkins
+
+- name: Generate random initial Jenkins admin password if not present
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -f "{{ vle9_base_dir }}/secrets/jenkins_admin_password" ]; then
+      openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24 > "{{ vle9_base_dir }}/secrets/jenkins_admin_password"
+      chmod 600 "{{ vle9_base_dir }}/secrets/jenkins_admin_password"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure Jenkins init.groovy.d directory exists
+  ansible.builtin.file:
+    path: /var/lib/jenkins/init.groovy.d
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0750"
+
+- name: Configure Jenkins security & admin user initialization script
+  ansible.builtin.copy:
+    dest: /var/lib/jenkins/init.groovy.d/01-vle9-security.groovy
+    owner: jenkins
+    group: jenkins
+    mode: "0640"
+    content: |
+      import jenkins.model.*
+      import hudson.security.*
+
+      def flagFile = new File('/var/lib/jenkins/vle9-security-init.done')
+      if (flagFile.exists()) {
+        return
+      }
+
+      def instance = Jenkins.get()
+      def pwFile = new File('{{ vle9_base_dir }}/secrets/jenkins_admin_password')
+      if (!pwFile.exists()) {
+        return
+      }
+      def adminPassword = pwFile.text.trim()
+
+      def realm = new HudsonPrivateSecurityRealm(false)
+      realm.createAccount('vle9admin', adminPassword)
+      instance.setSecurityRealm(realm)
+
+      def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+      strategy.setAllowAnonymousRead(false)
+      instance.setAuthorizationStrategy(strategy)
+      instance.save()
+
+      flagFile.text = new Date().toString()
+  notify: Restart jenkins
+
+- name: Make jenkins_admin_password readable by jenkins user only during init
+  ansible.builtin.file:
+    path: "{{ vle9_base_dir }}/secrets/jenkins_admin_password"
+    owner: jenkins
+    group: ubuntu
+    mode: "0640"
+
+- name: Install required Jenkins plugins via jenkins-plugin-cli
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -f /var/lib/jenkins/vle9-plugins.done ]; then
+      jenkins-plugin-cli --plugin-download-directory /var/lib/jenkins/plugins --plugins \
+        git github workflow-aggregator pipeline-stage-view sonar credentials-binding ws-cleanup ansicolor
+      chown -R jenkins:jenkins /var/lib/jenkins/plugins
+      touch /var/lib/jenkins/vle9-plugins.done
+      chown jenkins:jenkins /var/lib/jenkins/vle9-plugins.done
+    fi
+  args:
+    executable: /bin/bash
+  register: plugin_install_result
+  changed_when: "'vle9-plugins.done' in plugin_install_result.stdout or plugin_install_result.rc == 0"
+  notify: Restart jenkins
+
+- name: Configure Nginx to expose ONLY /github-webhook/ publicly and deny everything else
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/vle9-webhook-only
+    mode: "0644"
+    content: |
+      server {
+          listen 80 default_server;
+          server_name _;
+
+          server_tokens off;
+
+          location = /github-webhook/ {
+              limit_except POST {
+                  deny all;
+              }
+              proxy_pass http://127.0.0.1:8080/github-webhook/;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+
+          location / {
+              return 403 "Forbidden: Access restricted to AWS SSM Session Manager\n";
+          }
+      }
+  notify: Restart nginx
+
+- name: Disable default Nginx site and enable vle9-webhook-only
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart nginx
+
+- name: Enable vle9-webhook-only Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/vle9-webhook-only
+    dest: /etc/nginx/sites-enabled/vle9-webhook-only
+    state: link
+  notify: Restart nginx
+
+- name: Enable and start Jenkins and Nginx services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - jenkins
+    - nginx
+

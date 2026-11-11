@@ -1,0 +1,61 @@
+---
+- name: Update apt cache and upgrade base packages
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: safe
+    cache_valid_time: 3600
+
+- name: Install essential system packages and Git
+  ansible.builtin.apt:
+    name:
+      - git
+      - curl
+      - jq
+      - unzip
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - apt-transport-https
+      - nginx
+      - fontconfig
+      - openjdk-17-jre-headless
+    state: present
+
+- name: Install Node.js 22 LTS from NodeSource for local CI helper checks
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! command -v node >/dev/null 2>&1 || ! node -v | grep -q '^v22\.'; then
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+      apt-get install -y nodejs
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure VLE-9 base directory structure exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ vle9_base_dir }}"
+    - "{{ vle9_base_dir }}/sonarqube"
+    - "{{ vle9_base_dir }}/monitoring"
+    - "{{ vle9_base_dir }}/prometheus"
+    - "{{ vle9_base_dir }}/grafana/provisioning/datasources"
+    - "{{ vle9_base_dir }}/grafana/provisioning/dashboards"
+    - "{{ vle9_base_dir }}/grafana/dashboards"
+    - "{{ vle9_base_dir }}/reports/trivy"
+    - "{{ vle9_base_dir }}/reports/zap"
+    - "{{ vle9_base_dir }}/secrets"
+
+- name: Ensure kernel sysctl tuning for SonarQube and containers
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-vle9-devsecops.conf
+    mode: "0644"
+    content: |
+      vm.max_map_count=262144
+      fs.file-max=65536
+      vm.swappiness=10
+  notify: Reload sysctl
+

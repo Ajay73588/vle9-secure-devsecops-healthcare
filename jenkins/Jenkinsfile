@@ -1,0 +1,233 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+
+  environment {
+    APP_IMAGE       = "securecare:${BUILD_NUMBER}"
+    SONAR_HOST_URL  = "http://127.0.0.1:9000"
+    REPORT_DIR      = "/opt/vle9/reports"
+    K8S_NAMESPACE   = "securecare"
+    TARGET_URL      = "http://127.0.0.1:8081"
+  }
+
+  stages {
+    stage('1. Checkout Source Code') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('2. Install Dependencies') {
+      steps {
+        dir('app') {
+          sh 'npm ci'
+        }
+      }
+    }
+
+    stage('3. Run Application Tests') {
+      steps {
+        dir('app') {
+          sh 'npm test'
+        }
+      }
+    }
+
+    stage('4. Run SonarQube SAST') {
+      steps {
+        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+          sh '''
+            set -euo pipefail
+            sonar-scanner \
+              -Dproject.settings=sonarqube/sonar-project.properties \
+              -Dsonar.host.url="${SONAR_HOST_URL}" \
+              -Dsonar.token="${SONAR_TOKEN}"
+
+            # Wait for Compute Engine task completion and record Quality Gate status
+            CE_TASK_URL=$(grep '^ceTaskUrl=' .scannerwork/report-task.txt | cut -d= -f2-)
+            ANALYSIS_ID=""
+            for i in $(seq 1 30); do
+              TASK_JSON=$(curl -fsS -u "${SONAR_TOKEN}:" "${CE_TASK_URL}")
+              TASK_STATUS=$(echo "${TASK_JSON}" | jq -r '.task.status')
+              if [ "${TASK_STATUS}" = "SUCCESS" ]; then
+                ANALYSIS_ID=$(echo "${TASK_JSON}" | jq -r '.task.analysisId')
+                break
+              elif [ "${TASK_STATUS}" = "FAILED" ] || [ "${TASK_STATUS}" = "CANCELED" ]; then
+                echo "SonarQube analysis task failed: ${TASK_STATUS}"
+                exit 1
+              fi
+              sleep 3
+            done
+
+            if [ -z "${ANALYSIS_ID}" ]; then
+              echo "Timed out waiting for SonarQube Compute Engine task"
+              exit 1
+            fi
+
+            QG_JSON=$(curl -fsS -u "${SONAR_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}")
+            echo "${QG_JSON}" | tee "${REPORT_DIR}/sonarqube-qg-${BUILD_NUMBER}.json"
+            QG_STATUS=$(echo "${QG_JSON}" | jq -r '.projectStatus.status')
+            echo "SONARQUBE_QUALITY_GATE=${QG_STATUS}" > .sonar-gate-result
+          '''
+        }
+      }
+    }
+
+    stage('5. Build Docker Image') {
+      steps {
+        sh '''
+          set -euo pipefail
+          docker build -f docker/Dockerfile -t "${APP_IMAGE}" -t securecare:latest .
+        '''
+      }
+    }
+
+    stage('6. Run Trivy Image Scan') {
+      steps {
+        sh '''
+          set -euo pipefail
+          mkdir -p "${REPORT_DIR}/trivy"
+          trivy image --no-progress --format table "${APP_IMAGE}" | tee "${REPORT_DIR}/trivy/trivy-table-${BUILD_NUMBER}.txt"
+          trivy image --no-progress --format json -o "${REPORT_DIR}/trivy/trivy-report-${BUILD_NUMBER}.json" "${APP_IMAGE}"
+          cp -f "${REPORT_DIR}/trivy/trivy-table-${BUILD_NUMBER}.txt" "${REPORT_DIR}/trivy/latest-trivy-table.txt"
+          cp -f "${REPORT_DIR}/trivy/trivy-report-${BUILD_NUMBER}.json" "${REPORT_DIR}/trivy/latest-trivy-report.json"
+
+          set +e
+          trivy image --no-progress --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 "${APP_IMAGE}" > "${REPORT_DIR}/trivy/trivy-gate-${BUILD_NUMBER}.txt" 2>&1
+          echo "TRIVY_GATE_EXIT=$?" > .trivy-gate-result
+          set -e
+          cat "${REPORT_DIR}/trivy/trivy-gate-${BUILD_NUMBER}.txt"
+        '''
+      }
+    }
+
+    stage('7. Apply Security Gates') {
+      steps {
+        sh '''
+          set -euo pipefail
+          . ./.sonar-gate-result
+          . ./.trivy-gate-result
+          echo "Evaluating Security Gates: SonarQube=${SONARQUBE_QUALITY_GATE}, TrivyFixableGateExit=${TRIVY_GATE_EXIT}"
+
+          if [ "${SONARQUBE_QUALITY_GATE}" != "OK" ]; then
+            echo "SECURITY GATE FAILED: SonarQube Quality Gate returned ${SONARQUBE_QUALITY_GATE}"
+            exit 1
+          fi
+
+          if [ "${TRIVY_GATE_EXIT}" -ne 0 ]; then
+            echo "SECURITY GATE FAILED: Fixable CRITICAL/HIGH container vulnerabilities detected by Trivy"
+            exit 1
+          fi
+        '''
+      }
+    }
+
+    stage('8. Deploy to Kubernetes') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'securecare-jwt-secret', variable: 'JWT_SECRET'),
+          string(credentialsId: 'securecare-admin-pass', variable: 'ADMIN_PASS_ENV'),
+          string(credentialsId: 'securecare-doctor-pass', variable: 'DOCTOR_PASS_ENV'),
+          string(credentialsId: 'securecare-nurse-pass', variable: 'NURSE_PASS_ENV')
+        ]) {
+          sh '''
+            set -euo pipefail
+            minikube image load "${APP_IMAGE}"
+
+            kubectl apply -f kubernetes/00-namespace.yaml
+            kubectl apply -f kubernetes/01-rbac.yaml
+            kubectl apply -f kubernetes/02-configmap.yaml
+
+            kubectl create secret generic securecare-secrets \
+              --namespace="${K8S_NAMESPACE}" \
+              --from-literal=JWT_SECRET="${JWT_SECRET}" \
+              --from-literal=ADMIN_PASS_ENV="${ADMIN_PASS_ENV}" \
+              --from-literal=DOCTOR_PASS_ENV="${DOCTOR_PASS_ENV}" \
+              --from-literal=NURSE_PASS_ENV="${NURSE_PASS_ENV}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            kubectl apply -f kubernetes/04-deployment.yaml
+            kubectl set image deployment/securecare securecare="${APP_IMAGE}" -n "${K8S_NAMESPACE}"
+            kubectl apply -f kubernetes/05-service.yaml
+
+            kubectl rollout status deployment/securecare -n "${K8S_NAMESPACE}" --timeout=120s
+            kubectl get all -n "${K8S_NAMESPACE}"
+
+            # Refresh host Nginx/socat target if Minikube IP changed
+            sudo /usr/local/bin/vle9-refresh-k8s-proxy.sh
+          '''
+        }
+      }
+    }
+
+    stage('9. Run OWASP ZAP Baseline Scan') {
+      steps {
+        sh '''
+          set -euo pipefail
+          mkdir -p "${REPORT_DIR}/zap"
+          chmod 777 "${REPORT_DIR}/zap"
+
+          set +e
+          docker run --rm --network host \
+            -v "${REPORT_DIR}/zap:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t "${TARGET_URL}" \
+            -r "zap-report-${BUILD_NUMBER}.html" \
+            -J "zap-report-${BUILD_NUMBER}.json" \
+            -w "zap-summary-${BUILD_NUMBER}.md"
+          ZAP_RC=$?
+          set -e
+
+          echo "OWASP ZAP baseline exit code: ${ZAP_RC}"
+          cp -f "${REPORT_DIR}/zap/zap-report-${BUILD_NUMBER}.html" "${REPORT_DIR}/zap/latest-zap-report.html"
+          cp -f "${REPORT_DIR}/zap/zap-report-${BUILD_NUMBER}.json" "${REPORT_DIR}/zap/latest-zap-report.json"
+          cp -f "${REPORT_DIR}/zap/zap-summary-${BUILD_NUMBER}.md" "${REPORT_DIR}/zap/latest-zap-summary.md"
+
+          # Fail if ZAP detected any High-risk alerts (riskcode == "3")
+          HIGH_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' "${REPORT_DIR}/zap/zap-report-${BUILD_NUMBER}.json")
+          echo "OWASP ZAP High-Risk Alerts: ${HIGH_COUNT}"
+          if [ "${HIGH_COUNT}" -gt 0 ]; then
+            echo "DAST GATE FAILED: OWASP ZAP reported ${HIGH_COUNT} High-risk alert(s)"
+            exit 1
+          fi
+        '''
+      }
+    }
+
+    stage('10. Verify Application Health & Telemetry') {
+      steps {
+        sh '''
+          set -euo pipefail
+          curl -fsS "${TARGET_URL}/health" | jq .
+          curl -fsS "${TARGET_URL}/ready" | jq .
+
+          UNAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${TARGET_URL}/api/patients")
+          echo "Unauthenticated /api/patients HTTP status: ${UNAUTH_CODE}"
+          test "${UNAUTH_CODE}" -eq 401
+
+          PROM_UP=$(curl -fsS "http://127.0.0.1:9090/api/v1/targets" | jq -r '.data.activeTargets[] | select(.labels.job=="securecare-app") | .health')
+          echo "Prometheus securecare-app target health: ${PROM_UP}"
+          test "${PROM_UP}" = "up"
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'rm -f .sonar-gate-result .trivy-gate-result || true'
+    }
+    success {
+      echo "VLE-9 SecureCare pipeline #${BUILD_NUMBER} PASSED all security gates and health checks."
+    }
+    failure {
+      echo "VLE-9 SecureCare pipeline #${BUILD_NUMBER} FAILED. Review stage logs and reports in ${REPORT_DIR}."
+    }
+  }
+}
+

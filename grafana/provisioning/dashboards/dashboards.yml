@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: "VLE-9 SecureCare Dashboards"
+    orgId: 1
+    folder: "VLE-9 DevSecOps"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+

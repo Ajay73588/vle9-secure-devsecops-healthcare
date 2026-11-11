@@ -1,0 +1,101 @@
+---
+- name: Install kubectl binary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -x /usr/local/bin/kubectl ]; then
+      KUBE_VER=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+      curl -fsSL "https://dl.k8s.io/release/${KUBE_VER}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl
+      chmod 0755 /usr/local/bin/kubectl
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Install Minikube binary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [ ! -x /usr/local/bin/minikube ]; then
+      curl -fsSL https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 -o /usr/local/bin/minikube
+      chmod 0755 /usr/local/bin/minikube
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Start Minikube cluster as jenkins user with Docker driver
+  become_user: jenkins
+  ansible.builtin.shell: |
+    set -euo pipefail
+    export HOME=/var/lib/jenkins
+    if ! minikube status 2>/dev/null | grep -q "host: Running"; then
+      minikube start --driver=docker --cpus=2 --memory=2048mb
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Create helper script to sync localhost:8081 Nginx proxy to Minikube NodePort
+  ansible.builtin.copy:
+    dest: /usr/local/bin/vle9-refresh-k8s-proxy.sh
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      MINIKUBE_IP=$(su -s /bin/bash jenkins -c 'HOME=/var/lib/jenkins minikube ip')
+      cat > /etc/nginx/sites-available/vle9-securecare-local <<EOF
+      server {
+          listen 127.0.0.1:8081;
+          server_name localhost 127.0.0.1;
+          server_tokens off;
+
+          location / {
+              proxy_pass http://${MINIKUBE_IP}:30080;
+              proxy_http_version 1.1;
+              proxy_set_header Host \$host;
+              proxy_set_header X-Real-IP \$remote_addr;
+              proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          }
+      }
+      EOF
+      ln -sf /etc/nginx/sites-available/vle9-securecare-local /etc/nginx/sites-enabled/vle9-securecare-local
+      nginx -t
+      systemctl reload nginx
+
+- name: Grant narrow sudo permission to jenkins for refreshing local proxy only
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/jenkins-vle9-proxy
+    mode: "0440"
+    content: |
+      jenkins ALL=(root) NOPASSWD: /usr/local/bin/vle9-refresh-k8s-proxy.sh
+
+- name: Run proxy refresh script to bind 127.0.0.1:8081 to Minikube NodePort
+  ansible.builtin.command: /usr/local/bin/vle9-refresh-k8s-proxy.sh
+  changed_when: false
+
+- name: Create systemd service to auto-start Minikube and refresh proxy on EC2 resume
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vle9-minikube.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=VLE-9 Minikube Cluster Auto-Start (Jenkins Profile)
+      After=docker.service network-online.target nginx.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      User=jenkins
+      Group=jenkins
+      Environment="HOME=/var/lib/jenkins"
+      ExecStart=/usr/local/bin/minikube start --driver=docker --cpus=2 --memory=2048mb
+      ExecStartPost=+/usr/local/bin/vle9-refresh-k8s-proxy.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable vle9-minikube systemd service
+  ansible.builtin.systemd:
+    name: vle9-minikube.service
+    enabled: true
+    daemon_reload: true
