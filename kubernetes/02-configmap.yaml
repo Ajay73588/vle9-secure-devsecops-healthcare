@@ -8,11 +8,5 @@ metadata:
 data:
   APP_NAME: "SecureCare"
   NODE_ENV: "production"
-  PORT: "3000"
   LOG_LEVEL: "info"
   COOKIE_SECURE: "false"
-  TOKEN_TTL_SECONDS: "3600"
-  ADMIN_USERNAME: "admin.securecare"
-  DOCTOR_USERNAME: "dr.sharma"
-  NURSE_USERNAME: "nurse.patel"
-

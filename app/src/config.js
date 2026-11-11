@@ -14,7 +14,7 @@ function requireSecret(envMap, key, allowEphemeralTest) {
 function loadConfig(envMap = process.env) {
   const nodeEnv = (envMap.NODE_ENV || 'development').trim();
   const isTest = nodeEnv === 'test';
-  const port = Number.parseInt(envMap.PORT || '3000', 10);
+  const port = Number.parseInt(envMap.PORT || envMap.APP_PORT || '3000', 10);
 
   if (Number.isNaN(port) || port < (isTest ? 0 : 1) || port > 65535) {
     throw new Error('Invalid PORT configuration');
@@ -27,7 +27,7 @@ function loadConfig(envMap = process.env) {
     logLevel: (envMap.LOG_LEVEL || 'info').trim(),
     cookieSecure: String(envMap.COOKIE_SECURE || 'false').toLowerCase() === 'true',
     jwtSecret: requireSecret(envMap, 'JWT_SECRET', isTest),
-    tokenTtlSeconds: Number.parseInt(envMap.TOKEN_TTL_SECONDS || '3600', 10),
+    tokenTtlSeconds: Number.parseInt(envMap.SESSION_TTL_SECONDS || envMap.TOKEN_TTL_SECONDS || '3600', 10),
     users: [
       {
         username: (envMap.ADMIN_USERNAME || 'admin.securecare').trim(),

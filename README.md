@@ -20,7 +20,7 @@ Independent end-to-end DevSecOps implementation featuring a hardened synthetic h
 ├── screenshots/    # Genuine captured evidence screenshots
 ├── scripts/        # SSM port-forwarding and webhook sync helpers
 ├── sonarqube/      # SonarQube Community Compose stack & project properties
-├── terraform/      # Isolated VPC, IAM SSM profile, encrypted EBS, t3a.large EC2
+├── terraform/      # Isolated VPC, IAM SSM profile, encrypted EBS, m7i-flex.large EC2
 ├── trivy/          # Container vulnerability policy & scan docs
 └── zap/            # OWASP ZAP baseline DAST instructions
 ```

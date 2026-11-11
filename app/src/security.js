@@ -125,6 +125,16 @@ function parseCookies(cookieHeader) {
   return cookies;
 }
 
+function hasControlCharacters(value) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.codePointAt(i);
+    if (code < 32 || code === 127) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function sanitizeCleanText(value, maxLen) {
   if (typeof value !== 'string') {
     return null;
@@ -133,7 +143,7 @@ function sanitizeCleanText(value, maxLen) {
   if (trimmed.length === 0 || trimmed.length > maxLen) {
     return null;
   }
-  if (trimmed.includes('<') || trimmed.includes('>') || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+  if (trimmed.includes('<') || trimmed.includes('>') || hasControlCharacters(trimmed)) {
     return null;
   }
   return trimmed;

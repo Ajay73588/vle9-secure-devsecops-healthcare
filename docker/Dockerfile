@@ -15,6 +15,7 @@ ENV NODE_ENV=production \
     PORT=3000
 
 RUN apk update && apk upgrade --no-cache && \
+    rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* && \
     addgroup -g 10001 -S appgroup && \
     adduser -u 10001 -S appuser -G appgroup -H -D
 

@@ -33,7 +33,11 @@ pipeline {
     stage('3. Run Application Tests') {
       steps {
         dir('app') {
-          sh 'npm test'
+          sh '''#!/bin/bash
+            set -euo pipefail
+            mkdir -p coverage
+            npm run test:lcov
+          '''
         }
       }
     }
@@ -83,7 +87,7 @@ pipeline {
       steps {
         sh '''#!/bin/bash
           set -euo pipefail
-          docker build -f docker/Dockerfile -t "${APP_IMAGE}" -t securecare:latest .
+          docker build -f docker/Dockerfile -t "${APP_IMAGE}" -t securecare:1.0.0 .
         '''
       }
     }
@@ -156,7 +160,7 @@ pipeline {
               --from-literal=NURSE_PASS_ENV="${NURSE_PASS_ENV}" \
               --dry-run=client -o yaml | kubectl apply -f -
 
-            sed "s|securecare:latest|${APP_IMAGE}|g" kubernetes/04-deployment.yaml | kubectl apply -f -
+            sed "s|securecare:1.0.0|${APP_IMAGE}|g" kubernetes/04-deployment.yaml | kubectl apply -f -
             kubectl apply -f kubernetes/05-service.yaml
 
             kubectl rollout status deployment/securecare -n "${K8S_NAMESPACE}" --timeout=120s

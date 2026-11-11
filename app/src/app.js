@@ -17,6 +17,8 @@ const {
 } = require('./security');
 
 const AUTH_COOKIE_NAME = 'securecare_session';
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_MAX_ATTEMPTS = 30;
 
 function safeLog(level, event, details = {}) {
   const entry = {
@@ -28,14 +30,9 @@ function safeLog(level, event, details = {}) {
   process.stdout.write(`${JSON.stringify(entry)}\n`);
 }
 
-function createApp(overrideConfig = null) {
-  const config = overrideConfig || loadConfig();
-  const metrics = createMetricsRegistry();
-  const store = new HealthcareStore();
-
-  // Hash configured user credentials at startup; never store plaintext passwords in memory
+function buildUserDirectory(users) {
   const userDirectory = new Map();
-  for (const user of config.users) {
+  for (const user of users) {
     userDirectory.set(user.username, {
       username: user.username,
       passwordHash: hashSecretValue(user.password),
@@ -43,21 +40,11 @@ function createApp(overrideConfig = null) {
       displayName: user.displayName,
     });
   }
+  return userDirectory;
+}
 
-  // Simple sliding-window login attempt limiter per IP
-  const loginAttemptsByIp = new Map();
-  const LOGIN_WINDOW_MS = 60_000;
-  const LOGIN_MAX_ATTEMPTS = 30;
-
-  function syncInventoryMetrics() {
-    metrics.patientsTotal.set(store.patients.length);
-    metrics.appointmentsTotal.set(store.appointments.length);
-  }
-  syncInventoryMetrics();
-
-  const app = express();
+function applySecurityHeaders(app, config) {
   app.disable('x-powered-by');
-
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -96,10 +83,9 @@ function createApp(overrideConfig = null) {
     }
     next();
   });
+}
 
-  app.use(express.json({ limit: '16kb', strict: true }));
-
-  // Prometheus HTTP instrumentation
+function applyMetricsMiddleware(app, metrics) {
   app.use((req, res, next) => {
     const startNs = process.hrtime.bigint();
     res.on('finish', () => {
@@ -109,31 +95,27 @@ function createApp(overrideConfig = null) {
       const routeLabel = req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path;
       const statusStr = String(res.statusCode);
       const durationSec = Number(process.hrtime.bigint() - startNs) / 1e9;
-      metrics.httpRequestsTotal.inc({
-        method: req.method,
-        route: routeLabel,
-        status_code: statusStr,
-      });
+      metrics.httpRequestsTotal.inc({ method: req.method, route: routeLabel, status_code: statusStr });
       metrics.httpRequestDurationSeconds.observe(
-        {
-          method: req.method,
-          route: routeLabel,
-          status_code: statusStr,
-        },
+        { method: req.method, route: routeLabel, status_code: statusStr },
         durationSec
       );
     });
     next();
   });
+}
 
-  function extractToken(req) {
-    const authHeader = req.get('authorization');
-    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-      return authHeader.slice(7).trim();
-    }
-    const cookies = parseCookies(req.get('cookie'));
-    return cookies[AUTH_COOKIE_NAME] || null;
+function extractToken(req) {
+  const authHeader = req.get('authorization');
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
   }
+  const cookies = parseCookies(req.get('cookie'));
+  return cookies[AUTH_COOKIE_NAME] || null;
+}
+
+function createAuthGuards(config, metrics) {
+  const loginAttemptsByIp = new Map();
 
   function requireAuth(req, res, next) {
     const token = extractToken(req);
@@ -183,7 +165,10 @@ function createApp(overrideConfig = null) {
     return next();
   }
 
-  // Health & Monitoring Endpoints
+  return { requireAuth, requireRoles, checkLoginRateLimit };
+}
+
+function registerHealthRoutes(app, config, store, metrics) {
   app.get('/health', (_req, res) => {
     res.status(200).json({
       status: 'healthy',
@@ -206,9 +191,10 @@ function createApp(overrideConfig = null) {
     res.setHeader('Content-Type', metrics.register.contentType);
     res.status(200).send(await metrics.register.metrics());
   });
+}
 
-  // Authentication Endpoints
-  app.post('/api/auth/login', checkLoginRateLimit, (req, res) => {
+function registerAuthRoutes(app, config, metrics, userDirectory, guards) {
+  app.post('/api/auth/login', guards.checkLoginRateLimit, (req, res) => {
     const username = sanitizeCleanText(req.body?.username, 64);
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
@@ -227,11 +213,7 @@ function createApp(overrideConfig = null) {
 
     metrics.authLoginAttemptsTotal.inc({ outcome: 'success' });
     const token = signAuthToken(
-      {
-        sub: user.username,
-        role: user.role,
-        displayName: user.displayName,
-      },
+      { sub: user.username, role: user.role, displayName: user.displayName },
       config.jwtSecret,
       config.tokenTtlSeconds
     );
@@ -247,11 +229,7 @@ function createApp(overrideConfig = null) {
     safeLog('info', 'login_succeeded', { username: user.username, role: user.role });
 
     return res.status(200).json({
-      user: {
-        username: user.username,
-        role: user.role,
-        displayName: user.displayName,
-      },
+      user: { username: user.username, role: user.role, displayName: user.displayName },
       token,
     });
   });
@@ -266,16 +244,17 @@ function createApp(overrideConfig = null) {
     res.status(200).json({ status: 'signed_out' });
   });
 
-  app.get('/api/auth/me', requireAuth, (req, res) => {
+  app.get('/api/auth/me', guards.requireAuth, (req, res) => {
     res.status(200).json({ user: req.user });
   });
+}
 
-  // Healthcare Dashboard & Synthetic Records APIs
-  app.get('/api/dashboard/summary', requireAuth, (_req, res) => {
+function registerPatientRoutes(app, store, guards, syncInventoryMetrics) {
+  app.get('/api/dashboard/summary', guards.requireAuth, (_req, res) => {
     res.status(200).json(store.getSummary());
   });
 
-  app.get('/api/patients', requireAuth, (req, res) => {
+  app.get('/api/patients', guards.requireAuth, (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 64) : '';
     res.status(200).json({
       patients: store.listPatients(q),
@@ -283,7 +262,7 @@ function createApp(overrideConfig = null) {
     });
   });
 
-  app.get('/api/patients/:id', requireAuth, (req, res) => {
+  app.get('/api/patients/:id', guards.requireAuth, (req, res) => {
     const id = sanitizeCleanText(req.params.id, 16);
     if (!id || !/^SC-\d{4,6}$/.test(id)) {
       return res.status(400).json({ error: 'Invalid patient ID format' });
@@ -295,7 +274,7 @@ function createApp(overrideConfig = null) {
     return res.status(200).json({ patient });
   });
 
-  app.post('/api/patients', requireAuth, requireRoles(['admin', 'doctor']), (req, res) => {
+  app.post('/api/patients', guards.requireAuth, guards.requireRoles(['admin', 'doctor']), (req, res) => {
     const validated = validatePatientInput(req.body);
     if (validated.error) {
       return res.status(400).json({ error: validated.error });
@@ -310,7 +289,7 @@ function createApp(overrideConfig = null) {
     return res.status(201).json({ patient: created });
   });
 
-  app.patch('/api/patients/:id', requireAuth, requireRoles(['admin', 'doctor']), (req, res) => {
+  app.patch('/api/patients/:id', guards.requireAuth, guards.requireRoles(['admin', 'doctor']), (req, res) => {
     const id = sanitizeCleanText(req.params.id, 16);
     if (!id || !/^SC-\d{4,6}$/.test(id)) {
       return res.status(400).json({ error: 'Invalid patient ID format' });
@@ -337,7 +316,7 @@ function createApp(overrideConfig = null) {
     return res.status(200).json({ patient: updated });
   });
 
-  app.delete('/api/patients/:id', requireAuth, requireRoles(['admin']), (req, res) => {
+  app.delete('/api/patients/:id', guards.requireAuth, guards.requireRoles(['admin']), (req, res) => {
     const id = sanitizeCleanText(req.params.id, 16);
     if (!id || !/^SC-\d{4,6}$/.test(id)) {
       return res.status(400).json({ error: 'Invalid patient ID format' });
@@ -350,8 +329,10 @@ function createApp(overrideConfig = null) {
     safeLog('info', 'patient_deleted', { patientId: id, actor: req.user.username });
     return res.status(200).json({ deleted: id });
   });
+}
 
-  app.get('/api/appointments', requireAuth, (req, res) => {
+function registerAppointmentRoutes(app, store, guards, syncInventoryMetrics) {
+  app.get('/api/appointments', guards.requireAuth, (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : '';
     if (status && !ALLOWED_APPT_STATUSES.has(status)) {
       return res.status(400).json({ error: 'Invalid appointment status filter' });
@@ -359,7 +340,7 @@ function createApp(overrideConfig = null) {
     return res.status(200).json({ appointments: store.listAppointments(status) });
   });
 
-  app.post('/api/appointments', requireAuth, requireRoles(['admin', 'doctor', 'nurse']), (req, res) => {
+  app.post('/api/appointments', guards.requireAuth, guards.requireRoles(['admin', 'doctor', 'nurse']), (req, res) => {
     const validated = validateAppointmentInput(req.body);
     if (validated.error) {
       return res.status(400).json({ error: validated.error });
@@ -379,8 +360,8 @@ function createApp(overrideConfig = null) {
 
   app.patch(
     '/api/appointments/:id/status',
-    requireAuth,
-    requireRoles(['admin', 'doctor', 'nurse']),
+    guards.requireAuth,
+    guards.requireRoles(['admin', 'doctor', 'nurse']),
     (req, res) => {
       const id = sanitizeCleanText(req.params.id, 16);
       if (!id || !/^APT-\d{4,6}$/.test(id)) {
@@ -402,12 +383,10 @@ function createApp(overrideConfig = null) {
       return res.status(200).json({ appointment: updated });
     }
   );
+}
 
-  // Serve hardened static frontend
-  app.use(express.static(path.join(__dirname, '..', 'public'), { dotfiles: 'deny' }));
-
-  // Malformed JSON / Payload error handler
-  app.use((err, req, res, next) => {
+function registerErrorHandlers(app) {
+  app.use((err, req, res, _next) => {
     if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
       return res.status(400).json({ error: 'Malformed JSON request payload' });
     }
@@ -428,9 +407,35 @@ function createApp(overrideConfig = null) {
     }
     return res.status(404).type('text/plain').send('Not Found');
   });
+}
+
+function createApp(overrideConfig = null) {
+  const config = overrideConfig || loadConfig();
+  const metrics = createMetricsRegistry();
+  const store = new HealthcareStore();
+  const userDirectory = buildUserDirectory(config.users);
+
+  function syncInventoryMetrics() {
+    metrics.patientsTotal.set(store.patients.length);
+    metrics.appointmentsTotal.set(store.appointments.length);
+  }
+  syncInventoryMetrics();
+
+  const app = express();
+  applySecurityHeaders(app, config);
+  app.use(express.json({ limit: '16kb', strict: true }));
+  applyMetricsMiddleware(app, metrics);
+
+  const guards = createAuthGuards(config, metrics);
+  registerHealthRoutes(app, config, store, metrics);
+  registerAuthRoutes(app, config, metrics, userDirectory, guards);
+  registerPatientRoutes(app, store, guards, syncInventoryMetrics);
+  registerAppointmentRoutes(app, store, guards, syncInventoryMetrics);
+
+  app.use(express.static(path.join(__dirname, '..', 'public'), { dotfiles: 'deny' }));
+  registerErrorHandlers(app);
 
   return { app, config, store, metrics };
 }
 
 module.exports = { createApp };
-
