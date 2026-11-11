@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   options {
-    timestamps()
+    ansiColor('xterm')
     disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '10'))
   }
@@ -213,7 +213,14 @@ pipeline {
           echo "Unauthenticated /api/patients HTTP status: ${UNAUTH_CODE}"
           test "${UNAUTH_CODE}" -eq 401
 
-          PROM_UP=$(curl -fsS "http://127.0.0.1:9090/api/v1/targets" | jq -r '.data.activeTargets[] | select(.labels.job=="securecare-app") | .health')
+          PROM_UP="unknown"
+          for i in $(seq 1 6); do
+            PROM_UP=$(curl -fsS "http://127.0.0.1:9090/api/v1/targets" | jq -r '.data.activeTargets[] | select(.labels.job=="securecare-app") | .health')
+            if [ "${PROM_UP}" = "up" ]; then
+              break
+            fi
+            sleep 5
+          done
           echo "Prometheus securecare-app target health: ${PROM_UP}"
           test "${PROM_UP}" = "up"
         '''
