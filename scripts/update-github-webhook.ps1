@@ -19,7 +19,10 @@ if (-not $PublicIp -or $PublicIp -eq "None") {
 
 $WebhookUrl = "http://$PublicIp/github-webhook/"
 
-$credOutput = "protocol=https`nhost=github.com`n" | git credential fill
+$credIn = Join-Path $env:TEMP "vle9-gcred.txt"
+[System.IO.File]::WriteAllText($credIn, "protocol=https`nhost=github.com`n`n", [System.Text.UTF8Encoding]::new($false))
+$credOutput = cmd /c "git credential fill < `"$credIn`""
+Remove-Item -Force $credIn -ErrorAction SilentlyContinue
 $tokenLine = $credOutput | Select-String -Pattern '^password=(.+)$'
 if (-not $tokenLine) {
   Write-Error "GitHub token not found in Windows Git Credential Manager."
