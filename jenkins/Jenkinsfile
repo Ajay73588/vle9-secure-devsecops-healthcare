@@ -41,12 +41,13 @@ pipeline {
     stage('4. Run SonarQube SAST') {
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-          sh '''
+          sh '''#!/bin/bash
             set -euo pipefail
             sonar-scanner \
               -Dproject.settings=sonarqube/sonar-project.properties \
               -Dsonar.host.url="${SONAR_HOST_URL}" \
-              -Dsonar.token="${SONAR_TOKEN}"
+              -Dsonar.login="${SONAR_TOKEN}" \
+              -Dsonar.qualitygate.wait=false
 
             # Wait for Compute Engine task completion and record Quality Gate status
             CE_TASK_URL=$(grep '^ceTaskUrl=' .scannerwork/report-task.txt | cut -d= -f2-)
@@ -80,7 +81,7 @@ pipeline {
 
     stage('5. Build Docker Image') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euo pipefail
           docker build -f docker/Dockerfile -t "${APP_IMAGE}" -t securecare:latest .
         '''
@@ -89,7 +90,7 @@ pipeline {
 
     stage('6. Run Trivy FS & Image Scan') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euo pipefail
           mkdir -p "${REPORT_DIR}/trivy"
           trivy fs --no-progress --scanners vuln,misconfig,secret --format table . | tee "${REPORT_DIR}/trivy/trivy-fs-${BUILD_NUMBER}.txt"
@@ -112,7 +113,7 @@ pipeline {
 
     stage('7. Apply Security Gates') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euo pipefail
           . ./.sonar-gate-result
           . ./.trivy-gate-result
@@ -139,7 +140,7 @@ pipeline {
           string(credentialsId: 'securecare-doctor-pass', variable: 'DOCTOR_PASS_ENV'),
           string(credentialsId: 'securecare-nurse-pass', variable: 'NURSE_PASS_ENV')
         ]) {
-          sh '''
+          sh '''#!/bin/bash
             set -euo pipefail
             minikube image load "${APP_IMAGE}"
 
@@ -170,7 +171,7 @@ pipeline {
 
     stage('9. Run OWASP ZAP Baseline Scan') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euo pipefail
           mkdir -p "${REPORT_DIR}/zap"
           chmod 777 "${REPORT_DIR}/zap"
@@ -204,7 +205,7 @@ pipeline {
 
     stage('10. Verify Application Health & Telemetry') {
       steps {
-        sh '''
+        sh '''#!/bin/bash
           set -euo pipefail
           curl -fsS "${TARGET_URL}/health" | jq .
           curl -fsS "${TARGET_URL}/ready" | jq .
